@@ -16,7 +16,7 @@ on:
     inputs:
       OPENWRT_VERSION:
         description: 'OPENWRT VERSION'
-        required: false
+        required: true
         default: '23.05.3'
 
 jobs:
@@ -92,7 +92,7 @@ jobs:
       run: |
         git clone https://git.openwrt.org/openwrt/openwrt.git openwrt-source
         cd openwrt-source
-        git checkout v${{ env.OPENWRT_VERSION }}
+        git checkout v${{ github.event.inputs.OPENWRT_VERSION }}
 
     - name: Install Dependencies
       run: |
@@ -213,6 +213,9 @@ jobs:
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
+      env:
+        SCRIPTS_LIST: ${{ needs.prepare-scripts.outputs.scripts_list }}
+        SCRIPTS_AVAILABLE: ${{ needs.prepare-scripts.outputs.scripts_available }}
       with:
         tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-$(date +'%Y%m%d-%H%M')
         release_name: OpenWrt ${{ env.OPENWRT_VERSION }} Build $(date +'%Y-%m-%d %H:%M')
@@ -224,9 +227,8 @@ jobs:
           - 构建时间: $(date +'%Y-%m-%d %H:%M:%S')
           - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
           - 触发事件: ${{ github.event_name }}
-          - 包含首次启动脚本: ${{ needs.prepare-scripts.outputs.scripts_available }}
-          ${{ needs.prepare-scripts.outputs.scripts_available == 'true' && format('
-          **包含的脚本:**\n{0}', fromJSON('["' + needs.prepare-scripts.outputs.scripts_list + '"]') | join(', ')) || '' }}
+          - 包含首次启动脚本: ${{ env.SCRIPTS_AVAILABLE }}
+          ${{ env.SCRIPTS_AVAILABLE == 'true' && format('**包含的脚本:** {0}', env.SCRIPTS_LIST) || '' }}
           
           **使用说明:**
           1. 下载对应设备的固件文件
