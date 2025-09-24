@@ -32,8 +32,8 @@ jobs:
     - name: Discover config files
       id: config-matrix
       run: |
-        # 查找所有配置文件，过滤掉以点开头的隐藏文件
-        matrix=$(find configs -name "*.config" ! -name "-*" | jq -R -s -c '
+        # 查找所有配置文件，过滤掉以"-"开头的隐藏文件
+        matrix=$(find configs -name "*.config" ! -name ".*" | jq -R -s -c '
           split("\n") |
           map(select(. != "" and (. | test("^\\.") | not))) |
           map({
@@ -49,7 +49,7 @@ jobs:
     - name: Count configs
       id: config-count
       run: |
-        count=$(find configs -name "*.config" ! -name "-*" | wc -l)
+        count=$(find configs -name "*.config" ! -name ".*" | wc -l)
         echo "count=$count" >> $GITHUB_OUTPUT
 
   build:

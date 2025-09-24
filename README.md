@@ -24,11 +24,11 @@ configs/{target}_{subtarget}_{profile}.config
 - `configs/x86_64_generic.config`
 - `configs/ramips_mt7621_xiaomi_mir3g.config`
 
-可以排除不需要的配置文件，文件前加上"-"
+可以排除不需要的配置文件，文件前加上"."
 
 例如：
 
-- `-configs/x86_64_generic.config`
+- `.configs/x86_64_generic.config`
 
 ## 路由器脚本执行顺序
 
