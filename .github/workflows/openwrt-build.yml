@@ -32,17 +32,13 @@ jobs:
     - name: Discover config files
       id: config-matrix
       run: |
-        # 查找所有配置文件，过滤掉以"-"开头的隐藏文件
+        # 查找所有配置文件，过滤掉以点开头的隐藏文件
         matrix=$(find configs -name "*.config" ! -name ".*" | jq -R -s -c '
           split("\n") |
-          map(select(. != "" and (. | test("^\\.") | not))) |
-          map({
-            config_file: .,
-            config_name: (. | split("/")[-1] | split(".")[0]),
-            target: (. | split("/")[-1] | split("_")[0]),
-            subtarget: (. | split("/")[-1] | split("_")[1]),
-            profile: (. | split("/")[-1] | split("_")[2:] | join("_") | split(".")[0])
-          })
+          map(select(. != "")) |
+          { include: map(. | {
+            config_file: .
+          }) }
         ')
         echo "matrix=$matrix" >> $GITHUB_OUTPUT
         
@@ -52,8 +48,36 @@ jobs:
         count=$(find configs -name "*.config" ! -name ".*" | wc -l)
         echo "count=$count" >> $GITHUB_OUTPUT
 
+  prepare-scripts:
+    runs-on: ubuntu-latest
+    outputs:
+      scripts_available: ${{ steps.check-scripts.outputs.available }}
+      scripts_list: ${{ steps.list-scripts.outputs.list }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Check if scripts directory exists
+      id: check-scripts
+      run: |
+        if [ -d "scripts" ] && [ "$(ls -A scripts/*.sh 2>/dev/null | wc -l)" -gt 0 ]; then
+          echo "available=true" >> $GITHUB_OUTPUT
+        else
+          echo "available=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: List available scripts
+      id: list-scripts
+      run: |
+        if [ -d "scripts" ]; then
+          scripts=$(find scripts -name "*.sh" -type f | xargs -I {} basename {} | tr '\n' ',' | sed 's/,$//')
+          echo "list=$scripts" >> $GITHUB_OUTPUT
+        else
+          echo "list=none" >> $GITHUB_OUTPUT
+        fi
+
   build:
-    needs: discover-configs
+    needs: [discover-configs, prepare-scripts]
     if: needs.discover-configs.outputs.config_count != '0'
     runs-on: ubuntu-22.04
     strategy:
@@ -69,25 +93,6 @@ jobs:
         git clone https://git.openwrt.org/openwrt/openwrt.git openwrt-source
         cd openwrt-source
         git checkout v${{ env.OPENWRT_VERSION }}
-
-    - name: Copy Scripts to OpenWrt Filesystem
-      run: |
-        # 创建目标目录
-        mkdir -p openwrt-source/files/etc/uci-defaults
-        
-        # 复制scripts目录下的所有脚本
-        if [ -d "scripts" ]; then
-          echo "复制脚本文件到OpenWrt文件系统..."
-          cp -r scripts/* openwrt-source/files/etc/uci-defaults/
-          
-          # 设置可执行权限
-          chmod +x openwrt-source/files/etc/uci-defaults/*
-          
-          echo "复制的脚本文件:"
-          ls -la openwrt-source/files/etc/uci-defaults/
-        else
-          echo "scripts目录不存在，跳过脚本复制"
-        fi
 
     - name: Install Dependencies
       run: |
@@ -114,15 +119,35 @@ jobs:
           rsync \
           curl
 
+    - name: Parse config file info
+      id: config-info
+      run: |
+        config_file="${{ matrix.config_file }}"
+        config_name=$(basename "$config_file" .config)
+        # 将配置文件名按"_"分割
+        IFS='_' read -ra parts <<< "$config_name"
+        target=${parts[0]}
+        subtarget=${parts[1]}
+        # 剩余部分为profile
+        profile=$(IFS='_'; echo "${parts[*]:2}")
+        echo "config_file=$config_file" >> $GITHUB_OUTPUT
+        echo "config_name=$config_name" >> $GITHUB_OUTPUT
+        echo "target=$target" >> $GITHUB_OUTPUT
+        echo "subtarget=$subtarget" >> $GITHUB_OUTPUT
+        echo "profile=$profile" >> $GITHUB_OUTPUT
+
     - name: Debug Info
       run: |
-        echo "构建配置: ${{ matrix.config_file }}"
-        echo "配置名称: ${{ matrix.config_name }}"
-        echo "目标平台: ${{ matrix.target }}/${{ matrix.subtarget }}/${{ matrix.profile }}"
+        echo "构建配置: ${{ steps.config-info.outputs.config_file }}"
+        echo "配置名称: ${{ steps.config-info.outputs.config_name }}"
+        echo "目标平台: ${{ steps.config-info.outputs.target }}/${{ steps.config-info.outputs.subtarget }}/${{ steps.config-info.outputs.profile }}"
+        echo "工作目录: $(pwd)"
+        echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
+        echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
 
     - name: Copy Configuration
       run: |
-        cp "${{ matrix.config_file }}" openwrt-source/.config
+        cp "${{ steps.config-info.outputs.config_file }}" openwrt-source/.config
 
     - name: Update Feeds
       working-directory: ./openwrt-source
@@ -130,6 +155,14 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    - name: Apply Custom Patches (Optional)
+      working-directory: ./openwrt-source
+      run: |
+        if [ -f "../scripts/apply-custom-patches.sh" ]; then
+          chmod +x ../scripts/apply-custom-patches.sh
+          ../scripts/apply-custom-patches.sh
+        fi
+            
     - name: Build Configuration
       working-directory: ./openwrt-source
       run: |
@@ -147,13 +180,14 @@ jobs:
         
         # 创建版本信息
         echo "OPENWRT_VERSION=${{ env.OPENWRT_VERSION }}" >> $GITHUB_ENV
-        echo "CONFIG_NAME=${{ matrix.config_name }}" >> $GITHUB_ENV
+        echo "CONFIG_NAME=${{ steps.config-info.outputs.config_name }}" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
+        echo "SCRIPTS_INCLUDED=${{ needs.prepare-scripts.outputs.scripts_available }}" >> $GITHUB_ENV
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-${{ matrix.config_name }}-${{ env.BUILD_DATE }}
+        name: openwrt-${{ steps.config-info.outputs.config_name }}-${{ env.BUILD_DATE }}
         path: |
           openwrt-source/bin/targets/**/*.bin
           openwrt-source/bin/targets/**/*.img
@@ -161,7 +195,7 @@ jobs:
         retention-days: 30
 
   create-release:
-    needs: [discover-configs, build]
+    needs: [discover-configs, build, prepare-scripts]
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
@@ -190,11 +224,20 @@ jobs:
           - 构建时间: $(date +'%Y-%m-%d %H:%M:%S')
           - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
           - 触发事件: ${{ github.event_name }}
+          - 包含首次启动脚本: ${{ needs.prepare-scripts.outputs.scripts_available }}
+          ${{ needs.prepare-scripts.outputs.scripts_available == 'true' && format('
+          **包含的脚本:**\n{0}', fromJSON('["' + needs.prepare-scripts.outputs.scripts_list + '"]') | join(', ')) || '' }}
           
           **使用说明:**
           1. 下载对应设备的固件文件
           2. 通过Web界面或命令行刷入设备
-          3. 首次使用建议备份原有配置
+          3. 首次启动时会自动执行配置脚本
+          4. 如需设置宽带拨号，请设置环境变量 PPPOE_USER 和 PPPOE_PASS
+          5. 首次使用建议备份原有配置
+          
+          **首次启动脚本说明:**
+          设备首次启动时会自动执行 `/usr/share/firstboot/` 目录下的脚本
+          宽带设置脚本会检查环境变量 `PPPOE_USER` 和 `PPPOE_PASS`，如设置则自动配置拨号
         draft: false
         prerelease: ${{ github.event_name == 'workflow_dispatch' }}
         files: |
@@ -204,7 +247,7 @@ jobs:
         fail_orphans: false
 
   cleanup:
-    needs: [discover-configs, build, create-release]
+    needs: [discover-configs, build, create-release, prepare-scripts]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -212,4 +255,5 @@ jobs:
       run: |
         echo "构建流程完成"
         echo "配置文件数量: ${{ needs.discover-configs.outputs.config_count }}"
+        echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "Release 创建: ${{ needs.create-release.result == 'success' && '成功' || '跳过' }}"
