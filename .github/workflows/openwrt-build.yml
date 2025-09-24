@@ -1,0 +1,215 @@
+name: Build OpenWrt Firmware - Auto Matrix
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'configs/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'configs/**'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      OPENWRT_VERSION:
+        description: 'OPENWRT VERSION'
+        required: false
+        default: '23.05.3'
+
+jobs:
+  discover-configs:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.config-matrix.outputs.matrix }}
+      config_count: ${{ steps.config-count.outputs.count }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Discover config files
+      id: config-matrix
+      run: |
+        # 查找所有配置文件，过滤掉以点开头的隐藏文件
+        matrix=$(find configs -name "*.config" ! -name "-*" | jq -R -s -c '
+          split("\n") |
+          map(select(. != "" and (. | test("^\\.") | not))) |
+          map({
+            config_file: .,
+            config_name: (. | split("/")[-1] | split(".")[0]),
+            target: (. | split("/")[-1] | split("_")[0]),
+            subtarget: (. | split("/")[-1] | split("_")[1]),
+            profile: (. | split("/")[-1] | split("_")[2:] | join("_") | split(".")[0])
+          })
+        ')
+        echo "matrix=$matrix" >> $GITHUB_OUTPUT
+        
+    - name: Count configs
+      id: config-count
+      run: |
+        count=$(find configs -name "*.config" ! -name "-*" | wc -l)
+        echo "count=$count" >> $GITHUB_OUTPUT
+
+  build:
+    needs: discover-configs
+    if: needs.discover-configs.outputs.config_count != '0'
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix: ${{ fromJSON(needs.discover-configs.outputs.matrix) }}
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Checkout OpenWrt Source
+      run: |
+        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt-source
+        cd openwrt-source
+        git checkout v${{ env.OPENWRT_VERSION }}
+
+    - name: Copy Scripts to OpenWrt Filesystem
+      run: |
+        # 创建目标目录
+        mkdir -p openwrt-source/files/etc/uci-defaults
+        
+        # 复制scripts目录下的所有脚本
+        if [ -d "scripts" ]; then
+          echo "复制脚本文件到OpenWrt文件系统..."
+          cp -r scripts/* openwrt-source/files/etc/uci-defaults/
+          
+          # 设置可执行权限
+          chmod +x openwrt-source/files/etc/uci-defaults/*
+          
+          echo "复制的脚本文件:"
+          ls -la openwrt-source/files/etc/uci-defaults/
+        else
+          echo "scripts目录不存在，跳过脚本复制"
+        fi
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          gcc \
+          g++ \
+          binutils \
+          patch \
+          bzip2 \
+          flex \
+          make \
+          gettext \
+          pkg-config \
+          unzip \
+          zlib1g-dev \
+          libc6-dev \
+          libssl-dev \
+          libncurses5-dev \
+          python3 \
+          python3-distutils \
+          rsync \
+          curl
+
+    - name: Debug Info
+      run: |
+        echo "构建配置: ${{ matrix.config_file }}"
+        echo "配置名称: ${{ matrix.config_name }}"
+        echo "目标平台: ${{ matrix.target }}/${{ matrix.subtarget }}/${{ matrix.profile }}"
+
+    - name: Copy Configuration
+      run: |
+        cp "${{ matrix.config_file }}" openwrt-source/.config
+
+    - name: Update Feeds
+      working-directory: ./openwrt-source
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Build Configuration
+      working-directory: ./openwrt-source
+      run: |
+        make defconfig
+        make -j$(($(nproc) + 1)) || make -j1 V=s
+
+    - name: Collect Artifacts
+      id: collect-artifacts
+      run: |
+        cd openwrt-source/bin/targets
+        # 查找固件文件
+        firmware_files=$(find . -name "*.bin" -o -name "*.img" -o -name "*.gz" | grep -v "/packages/" | head -10)
+        echo "找到的固件文件:"
+        echo "$firmware_files"
+        
+        # 创建版本信息
+        echo "OPENWRT_VERSION=${{ env.OPENWRT_VERSION }}" >> $GITHUB_ENV
+        echo "CONFIG_NAME=${{ matrix.config_name }}" >> $GITHUB_ENV
+        echo "BUILD_DATE=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-${{ matrix.config_name }}-${{ env.BUILD_DATE }}
+        path: |
+          openwrt-source/bin/targets/**/*.bin
+          openwrt-source/bin/targets/**/*.img
+          openwrt-source/bin/targets/**/*.gz
+        retention-days: 30
+
+  create-release:
+    needs: [discover-configs, build]
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+        
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-$(date +'%Y%m%d-%H%M')
+        release_name: OpenWrt ${{ env.OPENWRT_VERSION }} Build $(date +'%Y-%m-%d %H:%M')
+        body: |
+          # OpenWrt ${{ env.OPENWRT_VERSION }} 自动构建
+          
+          **构建信息:**
+          - 版本: ${{ env.OPENWRT_VERSION }}
+          - 构建时间: $(date +'%Y-%m-%d %H:%M:%S')
+          - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
+          - 触发事件: ${{ github.event_name }}
+          
+          **使用说明:**
+          1. 下载对应设备的固件文件
+          2. 通过Web界面或命令行刷入设备
+          3. 首次使用建议备份原有配置
+        draft: false
+        prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+        files: |
+          artifacts/**/*.bin
+          artifacts/**/*.img
+          artifacts/**/*.gz
+        fail_orphans: false
+
+  cleanup:
+    needs: [discover-configs, build, create-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Cleanup notification
+      run: |
+        echo "构建流程完成"
+        echo "配置文件数量: ${{ needs.discover-configs.outputs.config_count }}"
+        echo "Release 创建: ${{ needs.create-release.result == 'success' && '成功' || '跳过' }}"
