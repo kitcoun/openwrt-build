@@ -145,6 +145,7 @@ jobs:
         echo "配置名称: ${{ steps.config-info.outputs.config_name }}"
         echo "目标平台: ${{ steps.config-info.outputs.target }}/${{ steps.config-info.outputs.subtarget }}/${{ steps.config-info.outputs.profile }}"
         echo "工作目录: $(pwd)"
+        echo "OpenWrt版本: ${{ env.OPENWRT_VERSION }}"
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
 
@@ -182,7 +183,6 @@ jobs:
         echo "$firmware_files"
         
         # 创建版本信息
-        echo "OPENWRT_VERSION=${{ env.OPENWRT_VERSION }}" >> $GITHUB_ENV
         echo "CONFIG_NAME=${{ steps.config-info.outputs.config_name }}" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
         echo "SCRIPTS_INCLUDED=${{ needs.prepare-scripts.outputs.scripts_available }}" >> $GITHUB_ENV
@@ -208,6 +208,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
+    - name: Set current date
+      id: date
+      run: |
+        echo "CURRENT_DATE=$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+        echo "CURRENT_DATE_FULL=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+      
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
@@ -220,14 +226,14 @@ jobs:
         SCRIPTS_LIST: ${{ needs.prepare-scripts.outputs.scripts_list }}
         SCRIPTS_AVAILABLE: ${{ needs.prepare-scripts.outputs.scripts_available }}
       with:
-        tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-$(date +'%Y%m%d-%H%M')
-        release_name: OpenWrt ${{ env.OPENWRT_VERSION }} Build $(date +'%Y-%m-%d %H:%M')
+        tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-${{ steps.date.outputs.CURRENT_DATE }}
+        name: OpenWrt ${{ env.OPENWRT_VERSION }} Build ${{ steps.date.outputs.CURRENT_DATE }}
         body: |
           # OpenWrt ${{ env.OPENWRT_VERSION }} 自动构建
           
           **构建信息:**
           - 版本: ${{ env.OPENWRT_VERSION }}
-          - 构建时间: $(date +'%Y-%m-%d %H:%M:%S')
+          - 构建时间: ${{ steps.date.outputs.CURRENT_DATE_FULL }}
           - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
           - 触发事件: ${{ github.event_name }}
           - 包含首次启动脚本: ${{ env.SCRIPTS_AVAILABLE }}
@@ -249,7 +255,6 @@ jobs:
           artifacts/**/*.bin
           artifacts/**/*.img
           artifacts/**/*.gz
-        fail_orphans: false
 
   cleanup:
     needs: [discover-configs, build, create-release, prepare-scripts]
