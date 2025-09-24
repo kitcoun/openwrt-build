@@ -19,6 +19,9 @@ on:
         required: true
         default: '23.05.3'
 
+env:
+  OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || '23.05.3' }}
+
 jobs:
   discover-configs:
     runs-on: ubuntu-latest
@@ -92,7 +95,7 @@ jobs:
       run: |
         git clone https://git.openwrt.org/openwrt/openwrt.git openwrt-source
         cd openwrt-source
-        git checkout v${{ github.event.inputs.OPENWRT_VERSION }}
+        git checkout v${{ env.OPENWRT_VERSION }}
 
     - name: Install Dependencies
       run: |
