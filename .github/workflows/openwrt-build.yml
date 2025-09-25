@@ -7,11 +7,13 @@ on:
       - 'configs/**'
       - '.github/workflows/**'
       - 'scripts/**'
+      - 'package.config'  # 添加 package.config 文件监控
   pull_request:
     branches: [ main, master ]
     paths:
       - 'configs/**'
       - 'scripts/**'
+      - 'package.config'  # 添加 package.config 文件监控
   workflow_dispatch:
     inputs:
       OPENWRT_VERSION:
@@ -28,9 +30,19 @@ jobs:
     outputs:
       matrix: ${{ steps.config-matrix.outputs.matrix }}
       config_count: ${{ steps.config-count.outputs.count }}
+      has_package_config: ${{ steps.check-package-config.outputs.exists }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      
+    - name: Check if package.config exists
+      id: check-package-config
+      run: |
+        if [ -f "package.config" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
       
     - name: Discover config files
       id: config-matrix
@@ -120,7 +132,60 @@ jobs:
           python3 \
           python3-distutils \
           rsync \
-          curl
+          curl \
+          subversion  # 添加 subversion 以支持某些包仓库
+
+    - name: Add Custom Packages
+      if: needs.discover-configs.outputs.has_package_config == 'true'
+      id: add-packages
+      run: |
+        echo "发现 package.config 文件，开始处理自定义包..."
+        
+        # 创建临时目录
+        TEMP_DIR=$(mktemp -d)
+        
+        # 读取 package.config 文件
+        while IFS= read -r line; do
+          # 跳过空行和注释行
+          if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+            continue
+          fi
+          
+          # 分割行：URL 和 标记
+          url=$(echo "$line" | awk '{print $1}')
+          flag=$(echo "$line" | awk '{print $2}')
+          repo_name=$(basename "$url" .git)
+          
+          echo "处理仓库: $url"
+          echo "标记: $flag"
+          echo "仓库名: $repo_name"
+          
+          # 克隆仓库到临时目录
+          git clone --depth 1 "$url" "$TEMP_DIR/$repo_name"
+          
+          if [[ "$flag" == "list" ]]; then
+            echo "复制仓库根目录下的所有包到 openwrt-source/package/"
+            # 复制仓库根目录下的所有文件夹到 package 目录
+            find "$TEMP_DIR/$repo_name" -maxdepth 1 -type d ! -name '.git' ! -name '.' -exec cp -r {} openwrt-source/package/ \;
+          else
+            echo "将整个仓库复制到 openwrt-source/package/$repo_name"
+            # 复制整个仓库到 package 目录下
+            cp -r "$TEMP_DIR/$repo_name" openwrt-source/package/
+          fi
+          
+          echo "✅ 成功添加包: $repo_name"
+          
+        done < package.config
+        
+        # 清理临时目录
+        rm -rf "$TEMP_DIR"
+        
+        # 显示添加的包列表
+        echo "添加的自定义包列表:"
+        ls -la openwrt-source/package/ | tail -n +4
+        
+        # 设置输出变量
+        echo "packages_added=true" >> $GITHUB_OUTPUT
 
     - name: Parse config file info
       id: config-info
@@ -148,6 +213,8 @@ jobs:
         echo "OpenWrt版本: ${{ env.OPENWRT_VERSION }}"
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
+        echo "package.config存在: ${{ needs.discover-configs.outputs.has_package_config }}"
+        echo "自定义包已添加: ${{ steps.add-packages.outputs.packages_added || 'false' }}"
 
     - name: Copy Configuration
       run: |
@@ -158,14 +225,6 @@ jobs:
       run: |
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-    - name: Apply Custom Patches (Optional)
-      working-directory: ./openwrt-source
-      run: |
-        if [ -f "../scripts/apply-custom-patches.sh" ]; then
-          chmod +x ../scripts/apply-custom-patches.sh
-          ../scripts/apply-custom-patches.sh
-        fi
             
     - name: Build Configuration
       working-directory: ./openwrt-source
@@ -186,6 +245,7 @@ jobs:
         echo "CONFIG_NAME=${{ steps.config-info.outputs.config_name }}" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
         echo "SCRIPTS_INCLUDED=${{ needs.prepare-scripts.outputs.scripts_available }}" >> $GITHUB_ENV
+        echo "CUSTOM_PACKAGES_ADDED=${{ steps.add-packages.outputs.packages_added || 'false' }}" >> $GITHUB_ENV
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -225,6 +285,8 @@ jobs:
       env:
         SCRIPTS_LIST: ${{ needs.prepare-scripts.outputs.scripts_list }}
         SCRIPTS_AVAILABLE: ${{ needs.prepare-scripts.outputs.scripts_available }}
+        PACKAGES_ADDED: ${{ needs.build.result == 'success' && '是' || '否' }}
+        HAS_PACKAGE_CONFIG: ${{ needs.discover-configs.outputs.has_package_config }}
       with:
         tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-${{ steps.date.outputs.CURRENT_DATE }}
         name: OpenWrt ${{ env.OPENWRT_VERSION }} Build ${{ steps.date.outputs.CURRENT_DATE }}
@@ -237,6 +299,8 @@ jobs:
           - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
           - 触发事件: ${{ github.event_name }}
           - 包含首次启动脚本: ${{ env.SCRIPTS_AVAILABLE }}
+          - 包含自定义包: ${{ env.HAS_PACKAGE_CONFIG == 'true' && env.PACKAGES_ADDED || '否' }}
+          
           ${{ env.SCRIPTS_AVAILABLE == 'true' && format('**包含的脚本:** {0}', env.SCRIPTS_LIST) || '' }}
           
           **使用说明:**
@@ -245,6 +309,9 @@ jobs:
           3. 首次启动时会自动执行配置脚本
           4. 如需设置宽带拨号，请设置环境变量 PPPOE_USER 和 PPPOE_PASS
           5. 首次使用建议备份原有配置
+          
+          **自定义包说明:**
+          ${{ env.HAS_PACKAGE_CONFIG == 'true' && '此版本包含了自定义软件包，请在菜单配置中查找新增的包选项。' || '此版本未包含额外自定义包。' }}
           
           **首次启动脚本说明:**
           设备首次启动时会自动执行 `/usr/share/firstboot/` 目录下的脚本
@@ -266,4 +333,5 @@ jobs:
         echo "构建流程完成"
         echo "配置文件数量: ${{ needs.discover-configs.outputs.config_count }}"
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
+        echo "自定义包配置存在: ${{ needs.discover-configs.outputs.has_package_config }}"
         echo "Release 创建: ${{ needs.create-release.result == 'success' && '成功' || '跳过' }}"
