@@ -183,7 +183,7 @@ jobs:
           url=$(echo "$line" | awk '{print $2}')
           repo_name=$(basename "$url" .git)
           author=$(echo "$url" | awk -F'/' '{print $(NF-1)}')
-          feed_name="${author}-${repo_name}"
+          feed_name=$(echo "${author}-${repo_name}" | tr '-' '_')
           
           case $type in
             "feed")
