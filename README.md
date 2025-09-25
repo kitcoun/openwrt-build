@@ -65,19 +65,16 @@ export PPPOE_PASSWORD="your_pppoe_password"
 
 ## 第三方包使用方法
 
+只能使用一些简单的软件包，有一些软件会与官方冲突。
+建议在配置阶段（make menuconfig）中，通过配置选择要编译的包，然后通过命令自行解决冲突  [`参考`](README-BUILD.md)
+
 1. 在 [`package.config`](package.config) 文件中添加第三方仓库地址：
 
-   - 单个软件仓库：
-
-     ```
-     https://github.com/jerrykuku/luci-theme-argon
-     ```
-
-   - 包含多个软件的仓库，需加 `list` 标记：
-
-     ```
-     https://github.com/kenzok8/openwrt-packages list
-     ```
+    ```
+    # 例如
+    # src-git 名称 https://github.com/jerrykuku/luci-theme-argon
+    src-git jerrykuku https://github.com/jerrykuku/luci-theme-argon
+    ```
 
 2. 在设备配置文件（如 [`configs/x86_64_generic.config`](configs/.x86_64_generic.config)）中添加需要的第三方包：
 

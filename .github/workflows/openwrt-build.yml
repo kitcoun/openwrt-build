@@ -135,58 +135,6 @@ jobs:
           curl \
           subversion  # 添加 subversion 以支持某些包仓库
 
-    - name: Add Custom Packages
-      if: needs.discover-configs.outputs.has_package_config == 'true'
-      id: add-packages
-      run: |
-        echo "发现 package.config 文件，开始处理自定义包..."
-        
-        # 创建临时目录
-        TEMP_DIR=$(mktemp -d)
-        
-        # 读取 package.config 文件
-        while IFS= read -r line; do
-          # 跳过空行和注释行
-          if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
-            continue
-          fi
-          
-          # 分割行：URL 和 标记
-          url=$(echo "$line" | awk '{print $1}')
-          flag=$(echo "$line" | awk '{print $2}')
-          repo_name=$(basename "$url" .git)
-          
-          echo "处理仓库: $url"
-          echo "标记: $flag"
-          echo "仓库名: $repo_name"
-          
-          # 克隆仓库到临时目录
-          git clone --depth 1 "$url" "$TEMP_DIR/$repo_name"
-          
-          if [[ "$flag" == "list" ]]; then
-            echo "复制仓库根目录下的所有包到 openwrt-source/package/"
-            # 复制仓库根目录下的所有文件夹到 package 目录
-            find "$TEMP_DIR/$repo_name" -maxdepth 1 -type d ! -name '.git' ! -name '.' -exec cp -r {} openwrt-source/package/ \;
-          else
-            echo "将整个仓库复制到 openwrt-source/package/$repo_name"
-            # 复制整个仓库到 package 目录下
-            cp -r "$TEMP_DIR/$repo_name" openwrt-source/package/
-          fi
-          
-          echo "✅ 成功添加包: $repo_name"
-          
-        done < package.config
-        
-        # 清理临时目录
-        rm -rf "$TEMP_DIR"
-        
-        # 显示添加的包列表
-        echo "添加的自定义包列表:"
-        ls -la openwrt-source/package/ | tail -n +4
-        
-        # 设置输出变量
-        echo "packages_added=true" >> $GITHUB_OUTPUT
-
     - name: Parse config file info
       id: config-info
       run: |
@@ -214,7 +162,32 @@ jobs:
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
         echo "package.config存在: ${{ needs.discover-configs.outputs.has_package_config }}"
-        echo "自定义包已添加: ${{ steps.add-packages.outputs.packages_added || 'false' }}"
+        echo "自定义feeds已设置: ${{ steps.setup-feeds.outputs.feeds_setup_completed || 'false' }}"
+        
+    - name: Setup Custom Feeds
+      if: needs.discover-configs.outputs.has_package_config == 'true'
+      id: setup-feeds
+      working-directory: ./openwrt-source
+      run: |
+        echo "发现 package.config 文件，开始设置自定义 feeds..."
+        
+        # 读取 package.config 文件并添加到 feeds.conf.default
+        while IFS= read -r line; do
+          # 跳过空行和注释行
+          if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+            continue
+          fi
+          
+          echo "添加 feed: $line"
+          # 直接添加到 feeds.conf.default
+          echo "$line" >> feeds.conf.default
+          
+        done < ../package.config
+        
+        echo "=== 当前的 feeds.conf.default 内容 ==="
+        cat feeds.conf.default
+        
+        echo "feeds_setup_completed=true" >> $GITHUB_OUTPUT
 
     - name: Copy Configuration
       run: |
