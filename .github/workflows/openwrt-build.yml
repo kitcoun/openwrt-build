@@ -163,29 +163,54 @@ jobs:
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
         echo "package.config存在: ${{ needs.discover-configs.outputs.has_package_config }}"
         echo "自定义feeds已设置: ${{ steps.setup-feeds.outputs.feeds_setup_completed || 'false' }}"
-        
+
     - name: Setup Custom Feeds
       if: needs.discover-configs.outputs.has_package_config == 'true'
       id: setup-feeds
       working-directory: ./openwrt-source
       run: |
-        echo "发现 package.config 文件，开始设置自定义 feeds..."
+        echo "发现 package.config 文件，开始处理自定义仓库..."
         
-        # 读取 package.config 文件并添加到 feeds.conf.default
+        # 读取 package.config 文件并分类处理
         while IFS= read -r line; do
           # 跳过空行和注释行
           if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
             continue
           fi
           
-          echo "添加 feed: $line"
-          # 直接添加到 feeds.conf.default
-          echo "$line" >> feeds.conf.default
+          # 提取类型和URL
+          type=$(echo "$line" | awk '{print $1}')
+          url=$(echo "$line" | awk '{print $2}')
+          repo_name=$(basename "$url" .git)
+          author=$(echo "$url" | awk -F'/' '{print $(NF-1)}')
+          feed_name="${author}_${repo_name}"
+          
+          case $type in
+            "feed")
+              echo "添加多包feed: $repo_name ($url)"
+              # 添加到 feeds.conf.default
+              echo "src-git $feed_name $url" >> feeds.conf.default
+              ;;
+            "single")
+              echo "添加单包仓库: $repo_name ($url)"
+              # 直接克隆到 package 目录
+              git clone --depth 1 "$url" "package/$repo_name"
+              ;;
+            *)
+              echo "未知类型 '$type'，跳过: $line"
+              ;;
+          esac
           
         done < ../package.config
         
         echo "=== 当前的 feeds.conf.default 内容 ==="
         cat feeds.conf.default
+        
+        # 显示添加的单包列表
+        if [ $single_count -gt 0 ]; then
+          echo "添加的单包列表:"
+          ls -la package/ | grep -E "(luci-|app-|theme-)" | tail -n +4 || echo "无特定模式匹配的单包"
+        fi
         
         echo "feeds_setup_completed=true" >> $GITHUB_OUTPUT
 

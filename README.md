@@ -71,9 +71,7 @@ export PPPOE_PASSWORD="your_pppoe_password"
 1. 在 [`package.config`](package.config) 文件中添加第三方仓库地址：
 
     ```
-    # 例如
-    # src-git 名称 https://github.com/jerrykuku/luci-theme-argon
-    src-git jerrykuku https://github.com/jerrykuku/luci-theme-argon
+    feed https://github.com/kenzok8/openwrt-packages
     ```
 
 2. 在设备配置文件（如 [`configs/x86_64_generic.config`](configs/.x86_64_generic.config)）中添加需要的第三方包：
