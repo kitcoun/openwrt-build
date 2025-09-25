@@ -12,6 +12,29 @@
 git clone https://github.com/openwrt/openwrt.git openwrt-source
 cd openwrt-source
 git checkout v23.05.03
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential \
+    clang \
+    gcc \
+    g++ \
+    binutils \
+    patch \
+    bzip2 \
+    flex \
+    make \
+    gettext \
+    pkg-config \
+    unzip \
+    zlib1g-dev \
+    libc6-dev \
+    libssl-dev \
+    libncurses5-dev \
+    python3 \
+    python3-distutils \
+    rsync \
+    curl \
+    subversion
 ```
 
 ---

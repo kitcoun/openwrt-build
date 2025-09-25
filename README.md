@@ -30,7 +30,7 @@ configs/{target}_{subtarget}_{profile}.config
 
 如需排除某些配置文件，可在文件名前加“.”，如：
 
-- `.configs/x86_64_generic.config`
+- `configs/.x86_64_generic.config`
 
 ---
 
