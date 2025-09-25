@@ -183,18 +183,18 @@ jobs:
           url=$(echo "$line" | awk '{print $2}')
           repo_name=$(basename "$url" .git)
           author=$(echo "$url" | awk -F'/' '{print $(NF-1)}')
-          feed_name="${author}_${repo_name}"
+          feed_name="${author}-${repo_name}"
           
           case $type in
             "feed")
               echo "添加多包feed: $author $repo_name ($url)"
               # 添加到 feeds.conf.default
-              echo "src-git $author $url" >> feeds.conf.default
+              echo "src-git $feed_name $url" >> feeds.conf.default
               ;;
             "single")
               echo "添加单包仓库: $author $repo_name ($url)"
               # 直接克隆到 package 目录
-              git clone --depth 1 "$url" "$repo_name"
+              git clone --depth 1 "$url"
               ;;
             *)
               echo "未知类型 '$type'，跳过: $line"
