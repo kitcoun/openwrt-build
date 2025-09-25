@@ -255,7 +255,7 @@ jobs:
           openwrt-source/bin/targets/**/*.bin
           openwrt-source/bin/targets/**/*.img
           openwrt-source/bin/targets/**/*.gz
-        retention-days: 30
+        retention-days: 7
 
   create-release:
     needs: [discover-configs, build, prepare-scripts]
