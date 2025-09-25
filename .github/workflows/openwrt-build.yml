@@ -22,7 +22,7 @@ on:
         default: 'v23.05.3'
 
 env:
-  OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || 'v23.05.3' }}
+  OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || 'v22.03.7' }}
 
 jobs:
   discover-configs:
