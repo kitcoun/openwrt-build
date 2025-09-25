@@ -207,10 +207,7 @@ jobs:
         cat feeds.conf.default
         
         # 显示添加的单包列表
-        if [ $single_count -gt 0 ]; then
-          echo "添加的单包列表:"
-          ls -la package/ | grep -E "(luci-|app-|theme-)" | tail -n +4 || echo "无特定模式匹配的单包"
-        fi
+        ls -la package/ | grep -E "(luci-|app-|theme-)" | tail -n +4 || echo "无特定模式匹配的单包"
         
         echo "feeds_setup_completed=true" >> $GITHUB_OUTPUT
 
