@@ -162,7 +162,6 @@ jobs:
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
         echo "package.config存在: ${{ needs.discover-configs.outputs.has_package_config }}"
-        echo "自定义feeds已设置: ${{ steps.setup-feeds.outputs.feeds_setup_completed || 'false' }}"
 
     - name: Setup Custom Feeds
       if: needs.discover-configs.outputs.has_package_config == 'true'
@@ -207,9 +206,7 @@ jobs:
         cat feeds.conf.default
         
         # 显示添加的单包列表
-        ls -la package/ | grep -E "(luci-|app-|theme-)" | tail -n +4 || echo "无特定模式匹配的单包"
-        
-        echo "feeds_setup_completed=true" >> $GITHUB_OUTPUT
+        ls -la package/ | grep -E "(luci-|app-|theme-)" || echo "无特定模式匹配的单包"
 
     - name: Copy Configuration
       run: |
