@@ -7,22 +7,22 @@ on:
       - 'configs/**'
       - '.github/workflows/**'
       - 'scripts/**'
-      - 'package.config'  # 添加 package.config 文件监控
+      - 'package.config'
   pull_request:
     branches: [ main, master ]
     paths:
       - 'configs/**'
       - 'scripts/**'
-      - 'package.config'  # 添加 package.config 文件监控
+      - 'package.config'
   workflow_dispatch:
     inputs:
       OPENWRT_VERSION:
         description: 'OPENWRT VERSION'
         required: true
-        default: '23.05.3'
+        default: 'v23.05.3'
 
 env:
-  OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || '23.05.3' }}
+  OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || 'v23.05.3' }}
 
 jobs:
   discover-configs:
@@ -105,9 +105,9 @@ jobs:
       
     - name: Checkout OpenWrt Source
       run: |
-        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt-source
+        git clone https://github.com/openwrt/openwrt.git openwrt-source
         cd openwrt-source
-        git checkout v${{ env.OPENWRT_VERSION }}
+        git checkout ${{ env.OPENWRT_VERSION }}
 
     - name: Install Dependencies
       run: |
