@@ -7,30 +7,11 @@
 ## 目录结构
 
 - `configs/`  
-  存放不同设备的配置文件，需遵循命名约定。
+  存放不同设备的配置文件。
 - `scripts/`  
   存放自动化执行的脚本，建议以数字开头排序，控制执行顺序。
 - `package.config`  
   存放第三方插件仓库地址。
-
----
-
-## 配置文件命名约定
-
-为保证自动化流程正常工作，配置文件需遵循如下命名规则：
-
-```sh
-configs/{target}_{subtarget}_{profile}.config
-```
-
-示例：
-
-- `configs/x86_64_generic.config`
-- `configs/ramips_mt7621_xiaomi_mir3g.config`
-
-如需排除某些配置文件，可在文件名前加“.”，如：
-
-- `configs/.x86_64_generic.config`
 
 ---
 

@@ -1,73 +1,27 @@
 name: Build OpenWrt Firmware - Auto Matrix
 
 on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - 'configs/**'
-      - '.github/workflows/**'
-      - 'scripts/**'
-      - 'package.config'
-  pull_request:
-    branches: [ main, master ]
-    paths:
-      - 'configs/**'
-      - 'scripts/**'
-      - 'package.config'
   workflow_dispatch:
     inputs:
       OPENWRT_VERSION:
         description: 'OPENWRT VERSION'
         required: true
         default: 'v23.05.3'
+      CONFIG_PATH:
+        description: '路径到 .config 文件（相对于仓库根），例如: configs/ramips_mt7621_K2P.config'
+        required: true
+        default: 'configs/ramips_mt7621_K2P.config'
 
 env:
   OPENWRT_VERSION: ${{ github.event.inputs.OPENWRT_VERSION || 'v22.03.7' }}
 
 jobs:
-  discover-configs:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.config-matrix.outputs.matrix }}
-      config_count: ${{ steps.config-count.outputs.count }}
-      has_package_config: ${{ steps.check-package-config.outputs.exists }}
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Check if package.config exists
-      id: check-package-config
-      run: |
-        if [ -f "package.config" ]; then
-          echo "exists=true" >> $GITHUB_OUTPUT
-        else
-          echo "exists=false" >> $GITHUB_OUTPUT
-        fi
-      
-    - name: Discover config files
-      id: config-matrix
-      run: |
-        # 查找所有配置文件，过滤掉以点开头的隐藏文件
-        matrix=$(find configs -name "*.config" ! -name ".*" | jq -R -s -c '
-          split("\n") |
-          map(select(. != "")) |
-          { include: map(. | {
-            config_file: .
-          }) }
-        ')
-        echo "matrix=$matrix" >> $GITHUB_OUTPUT
-        
-    - name: Count configs
-      id: config-count
-      run: |
-        count=$(find configs -name "*.config" ! -name ".*" | wc -l)
-        echo "count=$count" >> $GITHUB_OUTPUT
-
   prepare-scripts:
     runs-on: ubuntu-latest
     outputs:
       scripts_available: ${{ steps.check-scripts.outputs.available }}
       scripts_list: ${{ steps.list-scripts.outputs.list }}
+      has_package_config: ${{ steps.check-package-config.outputs.exists }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -91,14 +45,21 @@ jobs:
           echo "list=none" >> $GITHUB_OUTPUT
         fi
 
+    - name: Check if package.config exists
+      id: check-package-config
+      run: |
+        if [ -f "package.config" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+
   build:
-    needs: [discover-configs, prepare-scripts]
-    if: needs.discover-configs.outputs.config_count != '0'
+    needs: [prepare-scripts]
     runs-on: ubuntu-22.04
+    if: ${{ github.event.inputs.CONFIG_PATH != '' }}
     strategy:
-      matrix: ${{ fromJSON(needs.discover-configs.outputs.matrix) }}
       fail-fast: false
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -138,33 +99,27 @@ jobs:
     - name: Parse config file info
       id: config-info
       run: |
-        config_file="${{ matrix.config_file }}"
+        config_file="${{ github.event.inputs.CONFIG_PATH }}"
+        if [ ! -f "$config_file" ]; then
+          echo "指定的配置文件不存在: $config_file"
+          exit 1
+        fi
         config_name=$(basename "$config_file" .config)
-        # 将配置文件名按"_"分割
-        IFS='_' read -ra parts <<< "$config_name"
-        target=${parts[0]}
-        subtarget=${parts[1]}
-        # 剩余部分为profile
-        profile=$(IFS='_'; echo "${parts[*]:2}")
         echo "config_file=$config_file" >> $GITHUB_OUTPUT
         echo "config_name=$config_name" >> $GITHUB_OUTPUT
-        echo "target=$target" >> $GITHUB_OUTPUT
-        echo "subtarget=$subtarget" >> $GITHUB_OUTPUT
-        echo "profile=$profile" >> $GITHUB_OUTPUT
 
     - name: Debug Info
       run: |
         echo "构建配置: ${{ steps.config-info.outputs.config_file }}"
         echo "配置名称: ${{ steps.config-info.outputs.config_name }}"
-        echo "目标平台: ${{ steps.config-info.outputs.target }}/${{ steps.config-info.outputs.subtarget }}/${{ steps.config-info.outputs.profile }}"
         echo "工作目录: $(pwd)"
         echo "OpenWrt版本: ${{ env.OPENWRT_VERSION }}"
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
         echo "可用脚本: ${{ needs.prepare-scripts.outputs.scripts_list }}"
-        echo "package.config存在: ${{ needs.discover-configs.outputs.has_package_config }}"
+        echo "package.config存在: ${{ needs.prepare-scripts.outputs.has_package_config }}"
 
     - name: Setup Custom Feeds
-      if: needs.discover-configs.outputs.has_package_config == 'true'
+      if: needs.prepare-scripts.outputs.has_package_config == 'true'
       id: setup-feeds
       working-directory: ./openwrt-source
       run: |
@@ -250,7 +205,7 @@ jobs:
         retention-days: 7
 
   create-release:
-    needs: [discover-configs, build, prepare-scripts]
+    needs: [build, prepare-scripts]
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
@@ -278,7 +233,7 @@ jobs:
         SCRIPTS_LIST: ${{ needs.prepare-scripts.outputs.scripts_list }}
         SCRIPTS_AVAILABLE: ${{ needs.prepare-scripts.outputs.scripts_available }}
         PACKAGES_ADDED: ${{ needs.build.result == 'success' && '是' || '否' }}
-        HAS_PACKAGE_CONFIG: ${{ needs.discover-configs.outputs.has_package_config }}
+        HAS_PACKAGE_CONFIG: ${{ needs.prepare-scripts.outputs.has_package_config }}
       with:
         tag_name: ${{ github.event.inputs.release_tag || 'nightly' }}-${{ steps.date.outputs.CURRENT_DATE }}
         name: OpenWrt ${{ env.OPENWRT_VERSION }} Build ${{ steps.date.outputs.CURRENT_DATE }}
@@ -288,7 +243,7 @@ jobs:
           **构建信息:**
           - 版本: ${{ env.OPENWRT_VERSION }}
           - 构建时间: ${{ steps.date.outputs.CURRENT_DATE_FULL }}
-          - 配置文件数量: ${{ needs.discover-configs.outputs.config_count }}
+          - 配置路径: ${{ github.event.inputs.CONFIG_PATH }}
           - 触发事件: ${{ github.event_name }}
           - 包含首次启动脚本: ${{ env.SCRIPTS_AVAILABLE }}
           - 包含自定义包: ${{ env.HAS_PACKAGE_CONFIG == 'true' && env.PACKAGES_ADDED || '否' }}
@@ -303,7 +258,7 @@ jobs:
           5. 首次使用建议备份原有配置
           
           **自定义包说明:**
-          ${{ env.HAS_PACKAGE_CONFIG == 'true' && '此版本包含了自定义软件包，请在菜单配置中查找新增的包选项。' || '此版本未包含额外自定义包。' }}
+          ${{ needs.prepare-scripts.outputs.has_package_config == 'true' && '此版本包含了自定义软件包，请在菜单配置中查找新增的包选项。' || '此版本未包含额外自定义包。' }}
           
           **首次启动脚本说明:**
           设备首次启动时会自动执行 `/usr/share/firstboot/` 目录下的脚本
@@ -316,14 +271,14 @@ jobs:
           artifacts/**/*.gz
 
   cleanup:
-    needs: [discover-configs, build, create-release, prepare-scripts]
+    needs: [build, create-release, prepare-scripts]
     if: always()
     runs-on: ubuntu-latest
     steps:
     - name: Cleanup notification
       run: |
         echo "构建流程完成"
-        echo "配置文件数量: ${{ needs.discover-configs.outputs.config_count }}"
+        echo "配置路径: ${{ github.event.inputs.CONFIG_PATH }}"
         echo "脚本可用: ${{ needs.prepare-scripts.outputs.scripts_available }}"
-        echo "自定义包配置存在: ${{ needs.discover-configs.outputs.has_package_config }}"
+        echo "自定义包配置存在: ${{ needs.prepare-scripts.outputs.has_package_config }}"
         echo "Release 创建: ${{ needs.create-release.result == 'success' && '成功' || '跳过' }}"
