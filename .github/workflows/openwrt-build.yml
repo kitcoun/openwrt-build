@@ -60,6 +60,8 @@ jobs:
     if: ${{ github.event.inputs.CONFIG_PATH != '' }}
     strategy:
       fail-fast: false
+    outputs:
+      artifact_name: ${{ steps.set-artifact-name.outputs.artifact_name }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -183,16 +185,22 @@ jobs:
       id: collect-artifacts
       run: |
         cd openwrt-source/bin/targets
-        # 查找固件文件
         firmware_files=$(find . -name "*.bin" -o -name "*.img" -o -name "*.gz" | grep -v "/packages/" | head -10)
         echo "找到的固件文件:"
         echo "$firmware_files"
-        
-        # 创建版本信息
+
+    - name: Set build metadata
+      id: set-build-metadata
+      run: |
         echo "CONFIG_NAME=${{ steps.config-info.outputs.config_name }}" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_ENV
-        echo "SCRIPTS_INCLUDED=${{ needs.prepare-scripts.outputs.scripts_available }}" >> $GITHUB_ENV
-        echo "CUSTOM_PACKAGES_ADDED=${{ steps.add-packages.outputs.packages_added || 'false' }}" >> $GITHUB_ENV
+        echo "SCRIPTS_AVAILABLE=${{ needs.prepare-scripts.outputs.scripts_available }}" >> $GITHUB_ENV
+
+    - name: Set artifact name
+      id: set-artifact-name
+      run: |
+        ARTIFACT_NAME="openwrt-${{ steps.config-info.outputs.config_name }}-${{ env.BUILD_DATE }}"
+        echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -221,10 +229,11 @@ jobs:
         echo "CURRENT_DATE=$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
         echo "CURRENT_DATE_FULL=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
       
-    - name: Download all artifacts
+    - name: Download build artifact
       uses: actions/download-artifact@v4
       with:
-        path: ./artifacts
+        name: ${{ needs.build.outputs.artifact_name }}
+        path: ./artifacts/${{ needs.build.outputs.artifact_name }}
         
     - name: Create Release
       id: create_release
@@ -253,22 +262,16 @@ jobs:
           **使用说明:**
           1. 下载对应设备的固件文件
           2. 通过Web界面或命令行刷入设备
-          3. 首次启动时会自动执行配置脚本
-          4. 如需设置宽带拨号，请设置环境变量 PPPOE_USER 和 PPPOE_PASS
-          5. 首次使用建议备份原有配置
           
           **自定义包说明:**
           ${{ needs.prepare-scripts.outputs.has_package_config == 'true' && '此版本包含了自定义软件包，请在菜单配置中查找新增的包选项。' || '此版本未包含额外自定义包。' }}
-          
-          **首次启动脚本说明:**
-          设备首次启动时会自动执行 `/usr/share/firstboot/` 目录下的脚本
-          宽带设置脚本会检查环境变量 `PPPOE_USER` 和 `PPPOE_PASS`，如设置则自动配置拨号
+
         draft: false
         prerelease: ${{ github.event_name == 'workflow_dispatch' }}
         files: |
-          artifacts/**/*.bin
-          artifacts/**/*.img
-          artifacts/**/*.gz
+          artifacts/${{ needs.build.outputs.artifact_name }}/**/*.bin
+          artifacts/${{ needs.build.outputs.artifact_name }}/**/*.img
+          artifacts/${{ needs.build.outputs.artifact_name }}/**/*.gz
 
   cleanup:
     needs: [build, create-release, prepare-scripts]
