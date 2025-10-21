@@ -83,7 +83,7 @@ setup_ipv6() {
 setup_basic
 apply_network_config
 setup_pppoe
-setup_ipv6
+# setup_ipv6
 
 # 重启服务
 /etc/init.d/network restart
