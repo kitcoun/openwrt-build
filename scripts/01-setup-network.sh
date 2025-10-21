@@ -13,8 +13,7 @@ apply_network_config() {
     uci set network.lan.ipaddr="${LAN_IP:-192.168.2.1}"
     uci set network.lan.netmask="${LAN_NETMASK:-255.255.255.0}"
 
-    uci add_list dhcp.lan.dhcp_option='223.5.5.5'
-    uci add_list dhcp.lan.dhcp_option='119.29.29.29'
+    uci add_list dhcp.lan.dhcp_option='6,223.5.5.5,119.29.29.29'
 
     uci commit network
     
@@ -46,11 +45,13 @@ setup_basic() {
     log "Configuring basic system settings..."
     
     # 设置时区
-    uci set system.@system[0].timezone='UTC-8'
     uci set system.@system[0].zonename='Asia/Shanghai'
     
     # 设置主机名
     uci set system.@system[0].hostname="OpenWrt-${CONFIG_NAME:-Router}"
+
+    # 修改源
+    sed -i 's_downloads.openwrt.org_mirrors.ustc.edu.cn/openwrt_' /etc/opkg/distfeeds.conf
     
     uci commit system
 }
@@ -82,15 +83,142 @@ setup_ipv6() {
     fi
 }
 
+# 设置不指定接口并开放22端口入站
+setup_firewall_ssh() {
+    echo "22 port"
+    
+    # 添加允许SSH(22端口)的防火墙规则
+    uci add firewall rule
+    uci set firewall.@rule[-1].name='Allow-SSH'
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].proto='tcp'
+    uci set firewall.@rule[-1].src_port='322'
+    uci set firewall.@rule[-1].dest_port='22'
+    uci set firewall.@rule[-1].target='ACCEPT'
+    uci set firewall.@rule[-1].enabled='1'
+    
+    # 提交防火墙配置
+    uci commit firewall
+
+    # uci delete dropbear.@dropbear[0].Interface
+
+    uci commit dropbear
+}
+
+# 开放防火墙端口
+setup_firewall_http() {
+    echo "80 port"
+    
+    # 添加允许HTTP(80端口)的防火墙规则
+    uci add firewall rule
+    uci set firewall.@rule[-1].name='Allow-HTTP'
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].proto='tcp'
+    uci set firewall.@rule[-1].dest_port='80'
+    uci set firewall.@rule[-1].target='ACCEPT'
+    uci set firewall.@rule[-1].enabled='1'
+
+    # 允许从WAN访问lan1的所有TCP端口
+    uci add firewall rule
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].dest='lan'
+    uci set firewall.@rule[-1].name='Allow-WAN-TCP-Lan1'
+    uci add_list firewall.@rule[-1].dest_ip='10.0.0.136'
+    uci set firewall.@rule[-1].dest_port='8000-9000'
+    uci set firewall.@rule[-1].target='ACCEPT'
+
+    # 远程桌面端口
+    uci add firewall rule
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].dest='lan'
+    uci set firewall.@rule[-1].name='Remote Desktop'
+    uci set firewall.@rule[-1].src_port='33389'
+    uci add_list firewall.@rule[-1].dest_ip='10.0.0.136'
+    uci set firewall.@rule[-1].dest_port='3389'
+    uci set firewall.@rule[-1].target='ACCEPT'
+    
+    # 提交防火墙配置
+    uci commit firewall
+}
+
+# ddns设置
+setup_ddns(){
+    # 安装软件
+    apkg update
+    opkg install curl libustream-openssl
+    opkg install openssl-util
+    opkg install luci-app-ddns
+
+    # 删除
+    uci del ddns.myddns_ipv4
+
+    # 前置条件，修改username和password
+    # https://github.com/kitcoun/ddns-scripts-aliyun/tree/master?tab=readme-ov-file
+    # 本设备
+    uci del ddns.myddns_ipv6.update_url
+    uci del ddns.myddns_ipv6.domain
+    uci del ddns.myddns_ipv6.username
+    uci del ddns.myddns_ipv6.password
+    uci del ddns.myddns_ipv6.ip_source
+    uci del ddns.myddns_ipv6.ip_network
+    uci del ddns.myddns_ipv6.interface
+    uci set ddns.myddns_ipv6.enabled='1'
+    uci set ddns.myddns_ipv6.service_name='aliyun.com'
+    uci del ddns.myddns_ipv6.service_name
+    uci set ddns.myddns_ipv6.service_name='aliyun.com'
+    uci set ddns.myddns_ipv6.lookup_host='ly.dmsp.com'
+    uci set ddns.myddns_ipv6.domain='ly@dmsp.com'
+    uci set ddns.myddns_ipv6.username='xxxxx'
+    uci set ddns.myddns_ipv6.password='xxxxx'
+    uci set ddns.myddns_ipv6.ip_source='script'
+    uci set ddns.myddns_ipv6.ip_script='/usr/lib/ddns/wanv6script.sh'
+    uci set ddns.myddns_ipv6.interface='wan6'
+    uci set ddns.myddns_ipv6.use_syslog='2'
+
+    # 下级设备，修改username和password
+    uci set ddns.lan1_ipv6=service
+    uci set ddns.lan1_ipv6.service_name='aliyun.com'
+    uci set ddns.lan1_ipv6.use_ipv6='1'
+    uci set ddns.lan1_ipv6.enabled='1'
+    uci set ddns.lan1_ipv6.lookup_host='pc.dmsp.com'
+    uci set ddns.lan1_ipv6.domain='pc@dmsp.com'
+    uci set ddns.lan1_ipv6.username='xxx'
+    uci set ddns.lan1_ipv6.password='xxx'
+    uci set ddns.lan1_ipv6.ip_source='script'
+    uci set ddns.lan1_ipv6.ip_script='/usr/lib/ddns/lanv6script.sh'
+    uci set ddns.lan1_ipv6.interface='lan'
+    uci set ddns.lan1_ipv6.use_syslog='2'
+
+    uci commit ddns
+
+    /etc/init.d/ddns restart
+}
+
+# 防止ARP缓存过期导致无法唤醒
+setup_arp(){
+    # 添加静态ARP条目
+    # 路由器重启或长时间后ARP条目会自动清除
+    # 在局域网内只需要知道MAC地址就可以唤醒设备，无论关机多久，ARP表是否过期
+    # 远程唤醒，也只需要在唤醒前添加arp就可以了   
+
+    # 添加到本地启动脚本中
+    # sed -i '/^exit 0$/i\nsleep 15\narp -s 10.0.0.136 AA:BB:CC:DD:EE:FF' /etc/rc.local
+}
+
+
 # 执行配置
 setup_basic
 apply_network_config
 setup_pppoe
 # setup_ipv6
+# setup_firewall_ssh
+# setup_firewall_http
+# setup_ddns
 
 # 重启服务
 /etc/init.d/network restart
 /etc/init.d/firewall restart
+/etc/init.d/dropbear restart
 log "Network services restarted"
 
 log "First boot configuration completed successfully"
