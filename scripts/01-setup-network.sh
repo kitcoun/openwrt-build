@@ -13,6 +13,9 @@ apply_network_config() {
     uci set network.lan.ipaddr="${LAN_IP:-192.168.2.1}"
     uci set network.lan.netmask="${LAN_NETMASK:-255.255.255.0}"
 
+    uci add_list dhcp.lan.dhcp_option='223.5.5.5'
+    uci add_list dhcp.lan.dhcp_option='119.29.29.29'
+
     uci commit network
     
     log "The network configuration has been applied"
