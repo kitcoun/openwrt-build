@@ -29,7 +29,7 @@ setup_pppoe() {
         
         uci set network.wan=interface
         uci set network.wan.proto='pppoe'
-        uci set network.wan.ifname='eth1'  # 根据实际情况调整
+        uci set network.wan.ifname='wan'  # 根据实际情况调整
         uci set network.wan.username="$PPPOE_USERNAME"
         uci set network.wan.password="$PPPOE_PASSWORD"
         uci set network.wan.metric='10'
