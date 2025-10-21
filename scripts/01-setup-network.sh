@@ -152,7 +152,7 @@ setup_ddns(){
     # 删除
     uci del ddns.myddns_ipv4
 
-    # 前置条件，修改username和password
+    # 前置条件，修改username和password,查看下面的链接
     # https://github.com/kitcoun/ddns-scripts-aliyun/tree/master?tab=readme-ov-file
     # 本设备
     uci del ddns.myddns_ipv6.update_url
