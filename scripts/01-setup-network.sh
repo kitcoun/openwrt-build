@@ -205,6 +205,65 @@ setup_arp(){
     # sed -i '/^exit 0$/i\nsleep 15\narp -s 10.0.0.136 AA:BB:CC:DD:EE:FF' /etc/rc.local
 }
 
+# 安装软件
+setup_app(){
+    apkg update
+
+    # 启用 BBR TCP 拥塞控制内核模块（如果内核支持）
+    opkg install kmod-tcp-bbr
+}
+
+setup_upnp(){
+    # 现有还有问题
+    # 备份当前配置
+    cp /etc/config/upnpd /etc/config/upnpd.backup
+
+    # 重置配置
+    cat > /etc/config/upnpd << 'EOF'
+        config upnpd 'config'
+            option enabled '1'
+            option enable_upnp '1'
+            option enable_natpmp '0'
+            option enable_pcp '0'
+            option use_stun '0'
+            option enable_ipv6 '1'
+            option external_iface 'wan'
+            option internal_iface 'lan'
+            option download '1024'
+            option upload '512'
+            option port '5000'
+            option upnp_lease_file '/var/run/miniupnpd.leases'
+            option igdv1 '1'
+            option uuid '11cc567f-ea58-4245-999d-95b6f6857740'
+            option secure_mode '1'
+
+        config perm_rule
+            option action 'allow'
+            option ext_ports '1024-65535'
+            option int_addr '0.0.0.0/0'
+            option int_ports '1024-65535'
+            option comment 'Allow high ports'
+
+        config perm_rule
+            option action 'deny'
+            option ext_ports '0-65535'
+            option int_addr '0.0.0.0/0'
+            option int_ports '0-65535'
+            option comment 'Default deny'
+        EOF
+        
+    # 设置外部接口
+    uci set upnpd.config.external_iface='wan'
+
+    # 设置Presentation URL (请将示例地址替换为您路由器的实际LAN IP)
+    # uci set upnpd.config.presentation_url='http://[fd00::1]' 
+    uci add_list upnpd.config.presentation_url='http://10.0.0.1'
+
+    uci commit upnpd
+    # 重启服务
+    /etc/init.d/miniupnpd restart
+}
+
 
 # 执行配置
 setup_basic
