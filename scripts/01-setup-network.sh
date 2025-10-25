@@ -45,6 +45,7 @@ setup_basic() {
     log "Configuring basic system settings..."
     
     # 设置时区
+    uci set system.@system[0].timezone='UTC-8'
     uci set system.@system[0].zonename='Asia/Shanghai'
     
     # 设置主机名
@@ -92,7 +93,7 @@ setup_firewall_ssh() {
     uci set firewall.@rule[-1].name='Allow-SSH'
     uci set firewall.@rule[-1].src='wan'
     uci set firewall.@rule[-1].proto='tcp'
-    uci set firewall.@rule[-1].src_port='322'
+    uci set firewall.@rule[-1].src_port='22'
     uci set firewall.@rule[-1].dest_port='22'
     uci set firewall.@rule[-1].target='ACCEPT'
     uci set firewall.@rule[-1].enabled='1'
@@ -132,7 +133,7 @@ setup_firewall_http() {
     uci set firewall.@rule[-1].src='wan'
     uci set firewall.@rule[-1].dest='lan'
     uci set firewall.@rule[-1].name='Remote Desktop'
-    uci set firewall.@rule[-1].src_port='33389'
+    uci set firewall.@rule[-1].src_port='3389'
     uci add_list firewall.@rule[-1].dest_ip='10.0.0.136'
     uci set firewall.@rule[-1].dest_port='3389'
     uci set firewall.@rule[-1].target='ACCEPT'
@@ -152,6 +153,7 @@ setup_ddns(){
     # 删除
     uci del ddns.myddns_ipv4
 
+    # 阿里云ddns
     # 前置条件，修改username和password,查看下面的链接
     # https://github.com/kitcoun/ddns-scripts-aliyun/tree/master?tab=readme-ov-file
     # 本设备
@@ -182,8 +184,8 @@ setup_ddns(){
     uci set ddns.lan1_ipv6.enabled='1'
     uci set ddns.lan1_ipv6.lookup_host='pc.dmsp.com'
     uci set ddns.lan1_ipv6.domain='pc@dmsp.com'
-    uci set ddns.lan1_ipv6.username='xxx'
-    uci set ddns.lan1_ipv6.password='xxx'
+    uci set ddns.lan1_ipv6.username='xxxxx'
+    uci set ddns.lan1_ipv6.password='xxxxx'
     uci set ddns.lan1_ipv6.ip_source='script'
     uci set ddns.lan1_ipv6.ip_script='/usr/lib/ddns/lanv6script.sh'
     uci set ddns.lan1_ipv6.interface='lan'
@@ -213,44 +215,45 @@ setup_app(){
     opkg install kmod-tcp-bbr
 }
 
+#upnp
 setup_upnp(){
     # 现有还有问题
     # 备份当前配置
     cp /etc/config/upnpd /etc/config/upnpd.backup
 
     # 重置配置
-    cat > /etc/config/upnpd << 'EOF'
-        config upnpd 'config'
-            option enabled '1'
-            option enable_upnp '1'
-            option enable_natpmp '0'
-            option enable_pcp '0'
-            option use_stun '0'
-            option enable_ipv6 '1'
-            option external_iface 'wan'
-            option internal_iface 'lan'
-            option download '1024'
-            option upload '512'
-            option port '5000'
-            option upnp_lease_file '/var/run/miniupnpd.leases'
-            option igdv1 '1'
-            option uuid '11cc567f-ea58-4245-999d-95b6f6857740'
-            option secure_mode '1'
+cat > /etc/config/upnpd << 'EOF'
+    config upnpd 'config'
+        option enabled '1'
+        option enable_upnp '1'
+        option enable_natpmp '0'
+        option enable_pcp '0'
+        option use_stun '0'
+        option enable_ipv6 '1'
+        option external_iface 'wan'
+        option internal_iface 'lan'
+        option download '1024'
+        option upload '512'
+        option port '5000'
+        option upnp_lease_file '/var/run/miniupnpd.leases'
+        option igdv1 '1'
+        option uuid '11cc567f-ea58-4245-999d-95b6f6857740'
+        option secure_mode '1'
 
-        config perm_rule
-            option action 'allow'
-            option ext_ports '1024-65535'
-            option int_addr '0.0.0.0/0'
-            option int_ports '1024-65535'
-            option comment 'Allow high ports'
+    config perm_rule
+        option action 'allow'
+        option ext_ports '1024-65535'
+        option int_addr '0.0.0.0/0'
+        option int_ports '1024-65535'
+        option comment 'Allow high ports'
 
-        config perm_rule
-            option action 'deny'
-            option ext_ports '0-65535'
-            option int_addr '0.0.0.0/0'
-            option int_ports '0-65535'
-            option comment 'Default deny'
-        EOF
+    config perm_rule
+        option action 'deny'
+        option ext_ports '0-65535'
+        option int_addr '0.0.0.0/0'
+        option int_ports '0-65535'
+        option comment 'Default deny'
+EOF
         
     # 设置外部接口
     uci set upnpd.config.external_iface='wan'
@@ -262,6 +265,31 @@ setup_upnp(){
     uci commit upnpd
     # 重启服务
     /etc/init.d/miniupnpd restart
+}
+
+setup_acme(){
+    # 阿里云自签证书
+    # 下载脚本到/etc/acme/dnsapi/
+    # https://github.com/acmesh-official/acme.sh/blob/master/dnsapi/dns_ali.sh
+
+    uci set acme.@acme[0].account_email='mynickchen@Outlook.com'
+    uci set acme.@acme[0].debug='0'
+    uci set acme.dnscard=cert
+    uci set acme.dnscard.enabled='1'
+    uci set acme.dnscard.validation_method='dns'
+    uci set acme.dnscard.dns='dns_ali'
+    uci set acme.dnscard.credentials='Ali_Key="xxxx"' 'Ali_Secret="xxxxx"'
+    uci set acme.dnscard.staging='0'
+    uci set acme.dnscard.key_type='ec256'
+    uci set acme.dnscard.domains='dmsp.asia' '*.dmsp.asia'
+    
+    uci commit acme
+    # 重启服务
+    /etc/init.d/acme restart
+    # 重新执行
+    # /etc/init.d/acme renew
+    # 监听日志
+    # logread -f | grep -i "_acme-challenge\|txt value" &
 }
 
 
